@@ -67,6 +67,12 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                 .multiple(true)
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("compile_commands_dir")
+                .long("ccdir")
+                .required(false)
+                .takes_value(true),
+        )
         .get_matches();
 
     // Unwrapping these is fine since they're marked as required.
