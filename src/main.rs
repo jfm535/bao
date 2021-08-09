@@ -111,37 +111,41 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let index = Index::new(&clang, false, false);
     let mut tus: Vec<BaoTU> = Vec::new();
     let mut tu: Option<BaoTU> = None;
-    if matches.is_present("compile_commands_dir") {
-        let the_path = matches.value_of("compile_commands_dir").unwrap();
-        if let Ok(compile_commands) = clang::CompilationDatabase::from_directory(the_path) {
-            for compile_command in compile_commands
-                .get_all_compile_commands()
-                .get_commands()
-                .iter()
-            {
-                let filename = compile_command.get_filename();
-                let args = compile_command.get_arguments().drain(1..).collect::<Vec<String>>();
-                let result2 = BaoTU::from(index.parser(filename).arguments(&args).parse()?);
-                tus.push(result2);
+    let mut args = matches
+        .values_of("coptions")
+        .map(|values| {
+            values
+                .map(|value| value.replace('\"', ""))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if !pe.is_64 {
+        args.push(String::from("-m32"));
+    }
+
+    match matches.is_present("compile_commands_dir"){
+        true => {
+            let the_path = matches.value_of("compile_commands_dir").unwrap();
+            if let Ok(compile_commands) = clang::CompilationDatabase::from_directory(the_path) {
+                for compile_command in compile_commands
+                    .get_all_compile_commands()
+                    .get_commands()
+                    .iter()
+                {
+                    let filename = compile_command.get_filename();
+                    let mut cc_args = compile_command.get_arguments().drain(1..).collect::<Vec<String>>();
+                    cc_args.append(&mut args);
+                    let result2 = BaoTU::from(index.parser(filename).arguments(&cc_args).parse()?);
+                    tus.push(result2);
+                }
             }
         }
-    } else {
-        let mut args = matches
-            .values_of("coptions")
-            .map(|values| {
-                values
-                    .map(|value| value.replace('\"', ""))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        if !pe.is_64 {
-            args.push(String::from("-m32"));
+        false => {
+            let result1: Result<TranslationUnit, SourceError> =
+                index.parser(source).arguments(&args).parse();
+            tu = Option::Some(BaoTU::from(result1?));
         }
-
-        let result1: Result<TranslationUnit, SourceError> =
-            index.parser(source).arguments(&args).parse();
-        tu = Option::Some(BaoTU::from(result1?));
     }
 
     #[cfg(not(feature = "llvm_13"))]
