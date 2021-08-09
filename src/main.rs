@@ -135,7 +135,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                 {
                     let filename = compile_command.get_filename();
                     let mut cc_args = compile_command.get_arguments().drain(1..).collect::<Vec<String>>();
-                    cc_args.append(&mut args);
+                    cc_args.clone_from(&args);
                     let result2 = BaoTU::from(index.parser(filename).arguments(&cc_args).parse()?);
                     tus.push(result2);
                 }
