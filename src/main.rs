@@ -150,9 +150,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let funcs = tu.get_entities(EntityKind::FunctionDecl);
-    let structs = tu.get_entities(EntityKind::StructDecl);
-    let globals = tu.get_entities(EntityKind::VarDecl);
+    let funcs = tu.get_entities_visitor(EntityKind::FunctionDecl);
+    let structs = tu.get_entities_visitor(EntityKind::StructDecl);
+    let globals = tu.get_entities_visitor(EntityKind::VarDecl);
 
     let mut warnings = vec![];
 

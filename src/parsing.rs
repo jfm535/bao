@@ -260,16 +260,16 @@ impl<'tu> BaoTU<'tu> {
             .filter(|e| !e.is_in_system_header())
             .collect::<Vec<_>>()
     }
-    pub fn get_entities_visitor(&self, kind: EntityKind) -> Vec<Entity<'tu>> {
+    pub fn get_entities_visitor(&self, kind: EntityKind) -> Vec<Entity> {
         let mentity = self.0.get_entity();
         let mut found_entities:Vec<Entity> = Vec::new();
-        mentity.visit_children(|item| {
+        mentity.visit_children(|item,item2| {
             if !item.is_in_system_header() && kind == item.get_kind() {
                 found_entities.push(item);
             }
             return EntityVisitResult::Recurse;
         });
-        return found_entities;
+        return found_entities.clone();
     }
 }
 
