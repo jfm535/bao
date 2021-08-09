@@ -2,7 +2,7 @@ use crate::{
     error::BaoError,
     parsing::{BaoFunc, BaoStruct},
 };
-use clang::{Clang, Entity, EntityKind, Index};
+use clang::{Clang, Entity, EntityKind, Index, SourceError, TranslationUnit};
 
 use crate::{
     matching::BaoConfiguration,
@@ -109,21 +109,40 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let clang = Clang::new()?;
     let index = Index::new(&clang, false, false);
+    let mut tus: Vec<BaoTU> = Vec::new();
+    let mut tu: Option<BaoTU> = None;
+    if matches.is_present("compile_commands_dir") {
+        let the_path = matches.value_of("compile_commands_dir").unwrap();
+        if let Ok(compile_commands) = clang::CompilationDatabase::from_directory(the_path) {
+            for compile_command in compile_commands
+                .get_all_compile_commands()
+                .get_commands()
+                .iter()
+            {
+                let filename = compile_command.get_filename();
+                let args = compile_command.get_arguments().drain(1..).collect::<Vec<String>>();
+                let result2 = BaoTU::from(index.parser(filename).arguments(&args).parse()?);
+                tus.push(result2);
+            }
+        }
+    } else {
+        let mut args = matches
+            .values_of("coptions")
+            .map(|values| {
+                values
+                    .map(|value| value.replace('\"', ""))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
-    let mut args = matches
-        .values_of("coptions")
-        .map(|values| {
-            values
-                .map(|value| value.replace('\"', ""))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+        if !pe.is_64 {
+            args.push(String::from("-m32"));
+        }
 
-    if !pe.is_64 {
-        args.push(String::from("-m32"));
+        let result1: Result<TranslationUnit, SourceError> =
+            index.parser(source).arguments(&args).parse();
+        tu = Option::Some(BaoTU::from(result1?));
     }
-
-    let tu = BaoTU::from(index.parser(source).arguments(&args).parse()?);
 
     #[cfg(not(feature = "llvm_13"))]
     let mut generated = pdb_wrapper::PDB::new(pe.is_64)?;
@@ -138,28 +157,76 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
         pdb_wrapper::PDB::new(pe.is_64, 1, 0, guid)
     }?;
+    let mut funcs: Vec<Entity> = Vec::new();
+    let mut structs: Vec<Entity> = Vec::new();
+    let mut globals: Vec<Entity> = Vec::new();
+    if !matches.is_present("compile_commands_dir") {
+        if tu.is_some() {
+            if tu.as_ref().unwrap().has_errors() {
+                let has_errors = tu
+                    .as_ref()
+                    .unwrap()
+                    .get_diagnostics()
+                    .iter()
+                    .any(|diag| diag.get_severity() > Severity::Warning);
 
-    if tu.has_errors() {
-        let has_errors = tu
-            .get_diagnostics()
-            .iter()
-            .any(|diag| diag.get_severity() > Severity::Warning);
+                tu.as_ref()
+                    .unwrap()
+                    .get_diagnostics()
+                    .iter()
+                    .for_each(|err| error!("{}", err));
 
-        tu.get_diagnostics()
-            .iter()
-            .for_each(|err| error!("{}", err));
+                info!("Please fix these errors before continuing!");
 
-        info!("Please fix these errors before continuing!");
+                if has_errors {
+                    return Ok(());
+                }
+            }
+            let fkinds = tu.as_ref().unwrap().get_entities(EntityKind::FunctionDecl);
+            let fstruct = tu.as_ref().unwrap().get_entities(EntityKind::StructDecl);
+            let fglobals = tu.as_ref().unwrap().get_entities(EntityKind::VarDecl);
 
-        if has_errors {
-            return Ok(());
+            funcs.clone_from(&fkinds);
+            structs.clone_from(&fstruct);
+            globals.clone_from(&fglobals);
         }
+    } else {
+        for tui in &tus {
+            if tui.has_errors() {
+                let has_errors = tui
+                    .get_diagnostics()
+                    .iter()
+                    .any(|diag| diag.get_severity() > Severity::Warning);
+
+                tui.get_diagnostics()
+                    .iter()
+                    .for_each(|err| error!("{}", err));
+
+                info!("Please fix these errors before continuing!");
+
+                if has_errors {
+                    return Ok(());
+                }
+            }
+        }
+        let mut flet = tus
+            .iter()
+            .flat_map(|tui| return tui.get_entities(EntityKind::FunctionDecl))
+            .collect::<Vec<Entity>>();
+        funcs.append(&mut flet);
+        let mut slet = tus
+            .iter()
+            .flat_map(|tui| return tui.get_entities(EntityKind::StructDecl))
+            .collect::<Vec<Entity>>();
+        structs.append(&mut slet);
+        let mut glet = tus
+            .iter()
+            .flat_map(|tui| {
+                return tui.get_entities(EntityKind::VarDecl);
+            })
+            .collect::<Vec<Entity>>();
+        globals.append(&mut glet);
     }
-
-    let funcs = tu.get_entities(EntityKind::FunctionDecl);
-    let structs = tu.get_entities(EntityKind::StructDecl);
-    let globals = tu.get_entities(EntityKind::VarDecl);
-
     let mut warnings = vec![];
 
     info!("Parsed {} function definitions.", funcs.len());
@@ -194,7 +261,8 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     // table.
     pe.find_symbols(config.functions, &raw_pe, &mut warnings)
         .into_iter()
-        .map(|result| (func_types.get(&result.name), result)).try_for_each(|(ty, result)| {
+        .map(|result| (func_types.get(&result.name), result))
+        .try_for_each(|(ty, result)| {
             generated
                 .insert_function(result.index, result.offset, &result.name, ty.cloned())
                 .map_err(BaoError::from)
@@ -212,7 +280,8 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     // Insert the global variables with types, if they're specified.
     pe.find_symbols(config.globals, &raw_pe, &mut warnings)
         .into_iter()
-        .map(|result| (globals.get(&result.name), result)).try_for_each(|(ty, result)| {
+        .map(|result| (globals.get(&result.name), result))
+        .try_for_each(|(ty, result)| {
             generated
                 .insert_global(&result.name, result.index, result.offset, ty)
                 .map_err(BaoError::from)
