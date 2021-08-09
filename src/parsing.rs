@@ -1,5 +1,5 @@
 use crate::error::BaoError;
-use clang::{CallingConvention, Entity, EntityKind, TranslationUnit, Type, TypeKind};
+use clang::{CallingConvention, Entity, EntityKind, TranslationUnit, Type, TypeKind, EntityVisitResult};
 use pdb_wrapper::{pdb_meta::CallingConvention as CConv, PDBFunction, PDBType, StructField};
 use std::{convert::TryFrom, ops::Deref};
 
@@ -259,6 +259,14 @@ impl<'tu> BaoTU<'tu> {
             .filter(|e| e.get_kind() == kind)
             .filter(|e| !e.is_in_system_header())
             .collect::<Vec<_>>()
+    }
+    pub fn get_entities_visitor(&self,kinds: Vec<EntityKind>) {
+        let mentity = self.0.get_entity();
+        let found_entities:Vec<Vec<Entity>> = Vec::new();
+        mentity.visit_children(|item| {
+
+            return EntityVisitResult::Recurse;
+        });
     }
 }
 
