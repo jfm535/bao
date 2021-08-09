@@ -124,9 +124,8 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         args.push(String::from("-m32"));
     }
 
-    match matches.is_present("compile_commands_dir"){
-        true => {
-            let the_path = matches.value_of("compile_commands_dir").unwrap();
+    match matches.value_of("compile_commands_dir"){
+        Some(the_path) => {
             if let Ok(compile_commands) = clang::CompilationDatabase::from_directory(the_path) {
                 for compile_command in compile_commands
                     .get_all_compile_commands()
@@ -141,7 +140,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
         }
-        false => {
+        None => {
             let result1: Result<TranslationUnit, SourceError> =
                 index.parser(source).arguments(&args).parse();
             tu = Option::Some(BaoTU::from(result1?));
